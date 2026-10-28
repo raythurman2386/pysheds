@@ -116,14 +116,58 @@ class Raster(np.ndarray):
         return input_array, viewfinder, metadata
 
     @staticmethod
-    def _validate_nodata(nodata, dtype):
-        "Checks the NoData value is preserved when cast to the raster dtype"
-        nodata = np.array(nodata)
-        casted = nodata.astype(dtype, casting='unsafe')
+    def _validate_nodata(nodata, dtype, label='array'):
+        """Check that the nodata sentinel fits the raster dtype."""
+        if np.issubdtype(dtype, np.bool_):
+            return
+        nodata = np.asarray(nodata)
         try:
-            assert (nodata == casted) or np.can_cast(nodata, dtype, casting='safe')
-        except:
-            raise TypeError('`nodata` value not representable in dtype of array.')
+            is_nodata_nan = False
+            try:
+                if np.isnan(nodata):
+                    is_nodata_nan = True
+            except TypeError:
+                pass
+
+            if is_nodata_nan:
+                if not np.issubdtype(dtype, np.floating):
+                    raise TypeError(
+                        f'`nodata` value is np.nan, but {label} dtype {dtype} '
+                        'is not floating-point.'
+                    )
+                return
+
+            valid_nodata_for_dtype = False
+            if np.can_cast(nodata, dtype, casting='safe'):
+                valid_nodata_for_dtype = True
+            else:
+                is_nodata_int_like = np.issubdtype(nodata.dtype, np.integer)
+                is_obj_int_like = np.issubdtype(dtype, np.integer)
+                if is_nodata_int_like and is_obj_int_like:
+                    try:
+                        obj_iinfo = np.iinfo(dtype)
+                        nodata_as_py_int = int(nodata)
+                        if obj_iinfo.min <= nodata_as_py_int <= obj_iinfo.max:
+                            valid_nodata_for_dtype = True
+                    except ValueError:
+                        pass
+
+            if not valid_nodata_for_dtype:
+                error_message_detail = (
+                    f'`nodata` value {nodata} (type: {type(nodata)}) '
+                    f'not representable in {label} dtype {dtype}.'
+                )
+                if np.issubdtype(nodata.dtype, np.integer) and np.issubdtype(dtype, np.integer):
+                    try:
+                        obj_iinfo = np.iinfo(dtype)
+                        error_message_detail += (
+                            f' Range for {dtype} is [{obj_iinfo.min}, {obj_iinfo.max}].'
+                        )
+                    except ValueError:
+                        pass
+                raise AssertionError(error_message_detail)
+        except AssertionError as e_assert:
+            raise TypeError(str(e_assert)) from None
 
     @property
     def viewfinder(self):
